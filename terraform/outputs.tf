@@ -27,3 +27,18 @@ output "internet_gateway_id" {
   description = "ID of the VPC Internet Gateway"
   value       = aws_internet_gateway.main.id
 }
+
+output "app_instance_id" {
+  description = "ID of the private application EC2 instance"
+  value       = var.enable_runtime_resources ? aws_instance.app[0].id : null
+}
+
+output "app_instance_private_ip" {
+  description = "Private IP address of the application EC2 instance"
+  value       = var.enable_runtime_resources ? aws_instance.app[0].private_ip : null
+}
+
+output "nat_gateway_id" {
+  description = "ID of the NAT Gateway"
+  value       = var.enable_runtime_resources ? aws_nat_gateway.main[0].id : null
+}

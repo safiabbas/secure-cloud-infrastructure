@@ -1,3 +1,7 @@
+data "aws_ssm_parameter" "amazon_linux_2023" {
+  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+}
+
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
@@ -157,4 +161,120 @@ resource "aws_vpc_security_group_egress_rule" "app_to_data" {
   to_port     = 5432
 
   description = "Allow PostgreSQL traffic to data tier"
+}
+
+resource "aws_eip" "nat" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  domain = "vpc"
+
+  tags = {
+    Name = "secure-cloud-nat-eip"
+  }
+}
+
+resource "aws_nat_gateway" "main" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  allocation_id = aws_eip.nat[0].id
+  subnet_id     = aws_subnet.public.id
+
+  depends_on = [aws_internet_gateway.main]
+
+  tags = {
+    Name = "secure-cloud-nat-gateway"
+  }
+}
+
+resource "aws_route_table" "app" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.main[0].id
+  }
+
+  tags = {
+    Name = "secure-cloud-app-rt"
+  }
+}
+
+resource "aws_route_table_association" "app" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  subnet_id      = aws_subnet.app.id
+  route_table_id = aws_route_table.app[0].id
+}
+
+resource "aws_vpc_security_group_egress_rule" "app_https" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  security_group_id = aws_security_group.app.id
+
+  cidr_ipv4   = "0.0.0.0/0"
+  from_port   = 443
+  ip_protocol = "tcp"
+  to_port     = 443
+
+  description = "Allow outbound HTTPS for AWS services and updates"
+}
+
+resource "aws_iam_role" "ec2_ssm" {
+  name = "secure-cloud-ec2-ssm-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Effect = "Allow"
+
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = {
+    Name = "secure-cloud-ec2-ssm-role"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_core" {
+  role       = aws_iam_role.ec2_ssm.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "ec2_ssm" {
+  name = "secure-cloud-ec2-ssm-profile"
+  role = aws_iam_role.ec2_ssm.name
+}
+
+resource "aws_instance" "app" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  ami           = data.aws_ssm_parameter.amazon_linux_2023.value
+  instance_type = "t3.micro"
+
+  subnet_id                   = aws_subnet.app.id
+  vpc_security_group_ids      = [aws_security_group.app.id]
+  associate_public_ip_address = false
+
+  iam_instance_profile = aws_iam_instance_profile.ec2_ssm.name
+
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
+
+  tags = {
+    Name        = "secure-cloud-app-instance"
+    Project     = "secure-cloud-infrastructure"
+    Environment = "lab"
+  }
 }
