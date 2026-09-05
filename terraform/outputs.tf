@@ -42,3 +42,18 @@ output "nat_gateway_id" {
   description = "ID of the NAT Gateway"
   value       = var.enable_runtime_resources ? aws_nat_gateway.main[0].id : null
 }
+
+output "app_bucket_name" {
+  description = "Name of the application S3 bucket"
+  value       = aws_s3_bucket.app.bucket
+}
+
+output "app_secret_name" {
+  description = "Name of the application database secret"
+  value       = aws_secretsmanager_secret.app.name
+}
+
+output "app_secret_arn" {
+  description = "ARN of the application database secret"
+  value       = aws_secretsmanager_secret.app.arn
+}

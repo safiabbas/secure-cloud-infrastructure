@@ -2,6 +2,63 @@ data "aws_ssm_parameter" "amazon_linux_2023" {
   name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
 }
 
+data "aws_caller_identity" "current" {}
+
+data "aws_iam_policy_document" "s3_require_tls" {
+  statement {
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    actions = [
+      "s3:*"
+    ]
+
+    resources = [
+      aws_s3_bucket.app.arn,
+      "${aws_s3_bucket.app.arn}/*"
+    ]
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "app_permissions" {
+  statement {
+    sid    = "ReadApplicationSecret"
+    effect = "Allow"
+
+    actions = [
+      "secretsmanager:GetSecretValue"
+    ]
+
+    resources = [
+      aws_secretsmanager_secret.app.arn
+    ]
+  }
+
+  statement {
+    sid    = "ReadApplicationObjects"
+    effect = "Allow"
+
+    actions = [
+      "s3:GetObject"
+    ]
+
+    resources = [
+      "${aws_s3_bucket.app.arn}/*"
+    ]
+  }
+}
+
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
@@ -277,4 +334,73 @@ resource "aws_instance" "app" {
     Project     = "secure-cloud-infrastructure"
     Environment = "lab"
   }
+}
+
+resource "aws_s3_bucket" "app" {
+  bucket = "secure-cloud-app-${data.aws_caller_identity.current.account_id}"
+
+  tags = {
+    Name        = "secure-cloud-app-storage"
+    Project     = "secure-cloud-infrastructure"
+    Environment = "lab"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "app" {
+  bucket = aws_s3_bucket.app.id
+
+  block_public_acls       = true
+  ignore_public_acls      = true
+  block_public_policy     = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "app" {
+  bucket = aws_s3_bucket.app.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_versioning" "app" {
+  bucket = aws_s3_bucket.app.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_policy" "app" {
+  bucket = aws_s3_bucket.app.id
+  policy = data.aws_iam_policy_document.s3_require_tls.json
+}
+
+resource "aws_secretsmanager_secret" "app" {
+  name        = "secure-cloud/app/database"
+  description = "Application database credentials for the secure cloud lab"
+
+  tags = {
+    Name        = "secure-cloud-app-database-secret"
+    Project     = "secure-cloud-infrastructure"
+    Environment = "lab"
+  }
+}
+
+resource "aws_iam_policy" "app_permissions" {
+  name        = "secure-cloud-app-permissions"
+  description = "Least-privilege permissions for the application workload"
+
+  policy = data.aws_iam_policy_document.app_permissions.json
+
+  tags = {
+    Name = "secure-cloud-app-permissions"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "app_permissions" {
+  role       = aws_iam_role.ec2_ssm.name
+  policy_arn = aws_iam_policy.app_permissions.arn
 }
