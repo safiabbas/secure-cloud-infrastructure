@@ -5,7 +5,7 @@ variable "vpc_cidr" {
 }
 
 variable "enable_runtime_resources" {
-  description = "Whether to deploy temporary runtime resources such as NAT Gateway and EC2"
+  description = "Whether to deploy premium runtime resources such as EC2 and VPC Interface Endpoints"
   type        = bool
   default     = false
 }

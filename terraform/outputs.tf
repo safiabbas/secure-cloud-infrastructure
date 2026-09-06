@@ -38,11 +38,6 @@ output "app_instance_private_ip" {
   value       = var.enable_runtime_resources ? aws_instance.app[0].private_ip : null
 }
 
-output "nat_gateway_id" {
-  description = "ID of the NAT Gateway"
-  value       = var.enable_runtime_resources ? aws_nat_gateway.main[0].id : null
-}
-
 output "app_bucket_name" {
   description = "Name of the application S3 bucket"
   value       = aws_s3_bucket.app.bucket

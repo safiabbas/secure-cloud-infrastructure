@@ -59,6 +59,10 @@ data "aws_iam_policy_document" "app_permissions" {
   }
 }
 
+data "aws_prefix_list" "s3" {
+  name = "com.amazonaws.us-east-1.s3"
+}
+
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
@@ -220,38 +224,8 @@ resource "aws_vpc_security_group_egress_rule" "app_to_data" {
   description = "Allow PostgreSQL traffic to data tier"
 }
 
-resource "aws_eip" "nat" {
-  count = var.enable_runtime_resources ? 1 : 0
-
-  domain = "vpc"
-
-  tags = {
-    Name = "secure-cloud-nat-eip"
-  }
-}
-
-resource "aws_nat_gateway" "main" {
-  count = var.enable_runtime_resources ? 1 : 0
-
-  allocation_id = aws_eip.nat[0].id
-  subnet_id     = aws_subnet.public.id
-
-  depends_on = [aws_internet_gateway.main]
-
-  tags = {
-    Name = "secure-cloud-nat-gateway"
-  }
-}
-
 resource "aws_route_table" "app" {
-  count = var.enable_runtime_resources ? 1 : 0
-
   vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main[0].id
-  }
 
   tags = {
     Name = "secure-cloud-app-rt"
@@ -259,23 +233,21 @@ resource "aws_route_table" "app" {
 }
 
 resource "aws_route_table_association" "app" {
-  count = var.enable_runtime_resources ? 1 : 0
-
   subnet_id      = aws_subnet.app.id
-  route_table_id = aws_route_table.app[0].id
+  route_table_id = aws_route_table.app.id
 }
 
-resource "aws_vpc_security_group_egress_rule" "app_https" {
-  count = var.enable_runtime_resources ? 1 : 0
+resource "aws_route_table" "data" {
+  vpc_id = aws_vpc.main.id
 
-  security_group_id = aws_security_group.app.id
+  tags = {
+    Name = "secure-cloud-data-rt"
+  }
+}
 
-  cidr_ipv4   = "0.0.0.0/0"
-  from_port   = 443
-  ip_protocol = "tcp"
-  to_port     = 443
-
-  description = "Allow outbound HTTPS for AWS services and updates"
+resource "aws_route_table_association" "data" {
+  subnet_id      = aws_subnet.data.id
+  route_table_id = aws_route_table.data.id
 }
 
 resource "aws_iam_role" "ec2_ssm" {
@@ -312,6 +284,10 @@ resource "aws_iam_instance_profile" "ec2_ssm" {
   role = aws_iam_role.ec2_ssm.name
 }
 
+resource "aws_ebs_encryption_by_default" "main" {
+  enabled = true
+}
+
 resource "aws_instance" "app" {
   count = var.enable_runtime_resources ? 1 : 0
 
@@ -327,6 +303,10 @@ resource "aws_instance" "app" {
   metadata_options {
     http_endpoint = "enabled"
     http_tokens   = "required"
+  }
+
+  root_block_device {
+    encrypted = true
   }
 
   tags = {
@@ -403,4 +383,102 @@ resource "aws_iam_policy" "app_permissions" {
 resource "aws_iam_role_policy_attachment" "app_permissions" {
   role       = aws_iam_role.ec2_ssm.name
   policy_arn = aws_iam_policy.app_permissions.arn
+}
+
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.us-east-1.s3"
+  vpc_endpoint_type = "Gateway"
+
+  route_table_ids = [
+    aws_route_table.app.id
+  ]
+
+  tags = {
+    Name = "secure-cloud-s3-endpoint"
+  }
+}
+
+resource "aws_security_group" "vpc_endpoints" {
+  name        = "secure-cloud-vpc-endpoints-sg"
+  description = "Controls HTTPS access to interface VPC endpoints"
+  vpc_id      = aws_vpc.main.id
+
+  tags = {
+    Name = "secure-cloud-vpc-endpoints-sg"
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "vpc_endpoints_https_from_app" {
+  security_group_id            = aws_security_group.vpc_endpoints.id
+  referenced_security_group_id = aws_security_group.app.id
+
+  ip_protocol = "tcp"
+  from_port   = 443
+  to_port     = 443
+}
+
+resource "aws_vpc_security_group_egress_rule" "app_https_to_vpc_endpoints" {
+  security_group_id            = aws_security_group.app.id
+  referenced_security_group_id = aws_security_group.vpc_endpoints.id
+
+  ip_protocol = "tcp"
+  from_port   = 443
+  to_port     = 443
+}
+
+resource "aws_vpc_endpoint" "ssm" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.us-east-1.ssm"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.app.id]
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+
+  tags = {
+    Name = "secure-cloud-ssm-endpoint"
+  }
+}
+
+resource "aws_vpc_endpoint" "ssmmessages" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.us-east-1.ssmmessages"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.app.id]
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+
+  tags = {
+    Name = "secure-cloud-ssmmessages-endpoint"
+  }
+}
+
+resource "aws_vpc_endpoint" "secretsmanager" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.us-east-1.secretsmanager"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.app.id]
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+
+  tags = {
+    Name = "secure-cloud-secretsmanager-endpoint"
+  }
+}
+
+resource "aws_vpc_security_group_egress_rule" "app_https_to_s3" {
+  security_group_id = aws_security_group.app.id
+  prefix_list_id    = data.aws_prefix_list.s3.id
+
+  ip_protocol = "tcp"
+  from_port   = 443
+  to_port     = 443
+
+  description = "Allow HTTPS from app tier to Amazon S3"
 }
