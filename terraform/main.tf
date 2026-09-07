@@ -147,6 +147,35 @@ data "aws_iam_policy_document" "cloudtrail_bucket" {
   }
 }
 
+data "aws_iam_policy_document" "vpc_flow_logs_assume_role" {
+  statement {
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["vpc-flow-logs.amazonaws.com"]
+    }
+
+    actions = ["sts:AssumeRole"]
+  }
+}
+
+data "aws_iam_policy_document" "vpc_flow_logs_permissions" {
+  statement {
+    effect = "Allow"
+
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+      "logs:DescribeLogGroups",
+      "logs:DescribeLogStreams"
+    ]
+
+    resources = ["*"]
+  }
+}
+
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
@@ -632,5 +661,45 @@ resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
     noncurrent_version_expiration {
       noncurrent_days = 30
     }
+  }
+}
+
+resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
+  name              = "/secure-cloud/vpc-flow-logs"
+  retention_in_days = 7
+
+  tags = {
+    Name    = "secure-cloud-vpc-flow-logs"
+    Purpose = "VPC network telemetry"
+  }
+}
+
+resource "aws_iam_role" "vpc_flow_logs" {
+  name               = "secure-cloud-vpc-flow-logs-role"
+  assume_role_policy = data.aws_iam_policy_document.vpc_flow_logs_assume_role.json
+
+  tags = {
+    Name    = "secure-cloud-vpc-flow-logs-role"
+    Purpose = "Deliver VPC Flow Logs to CloudWatch Logs"
+  }
+}
+
+resource "aws_iam_role_policy" "vpc_flow_logs" {
+  name   = "secure-cloud-vpc-flow-logs-policy"
+  role   = aws_iam_role.vpc_flow_logs.id
+  policy = data.aws_iam_policy_document.vpc_flow_logs_permissions.json
+}
+
+resource "aws_flow_log" "main" {
+  vpc_id = aws_vpc.main.id
+
+  traffic_type         = "ALL"
+  log_destination_type = "cloud-watch-logs"
+  log_destination      = aws_cloudwatch_log_group.vpc_flow_logs.arn
+  iam_role_arn         = aws_iam_role.vpc_flow_logs.arn
+
+  tags = {
+    Name    = "secure-cloud-vpc-flow-log"
+    Purpose = "VPC network telemetry"
   }
 }
