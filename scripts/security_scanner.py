@@ -1,5 +1,7 @@
 import boto3
 import sys
+import json
+from datetime import datetime, timezone
 
 session = boto3.Session(profile_name="secure-cloud")
 
@@ -22,6 +24,12 @@ REQUIRED_VPC_ENDPOINT_SERVICES = {
     "com.amazonaws.us-east-1.ssm",
     "com.amazonaws.us-east-1.ssmmessages",
     "com.amazonaws.us-east-1.secretsmanager",
+}
+
+SEVERITY_WEIGHTS = {
+    "HIGH": 10,
+    "MEDIUM": 5,
+    "LOW": 2,
 }
 
 def create_finding(check_id, status, severity, resource, message):
@@ -645,6 +653,26 @@ def check_subnet_public_ip_assignment():
 
     return findings
 
+def calculate_security_score(findings):
+    total_possible = 0
+    failed_points = 0
+
+    for finding in findings:
+        severity = finding["severity"]
+        weight = SEVERITY_WEIGHTS[severity]
+
+        total_possible += weight
+
+        if finding["status"] == "FAIL":
+            failed_points += weight
+
+    if total_possible == 0:
+        return 100
+
+    score = 100 - ((failed_points / total_possible) * 100)
+
+    return round(score, 1)
+
 def print_summary(findings):
     total = len(findings)
 
@@ -669,6 +697,8 @@ def print_summary(findings):
             elif finding["severity"] == "LOW":
                 low_failures += 1
 
+    score = calculate_security_score(findings)
+
     print()
     print("=== Security Scan Summary ===")
     print(f"Total findings: {total}")
@@ -678,6 +708,38 @@ def print_summary(findings):
     print(f"High severity failures: {high_failures}")
     print(f"Medium severity failures: {medium_failures}")
     print(f"Low severity failures: {low_failures}")
+    print()
+    print(f"Security score: {score}/100")
+
+def write_json_report(findings, account_id, region):
+    score = calculate_security_score(findings)
+
+    report = {
+        "scan_metadata": {
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "account_id": account_id,
+            "region": region,
+        },
+        "summary": {
+            "total_findings": len(findings),
+            "passed": sum(
+                1 for finding in findings
+                if finding["status"] == "PASS"
+            ),
+            "failed": sum(
+                1 for finding in findings
+                if finding["status"] == "FAIL"
+            ),
+            "security_score": score,
+        },
+        "findings": findings,
+    }
+
+    with open("security_report.json", "w") as file:
+        json.dump(report, file, indent=4)
+
+    print()
+    print("JSON report written to security_report.json")
 
 def main():
     identity = sts.get_caller_identity()
@@ -712,6 +774,11 @@ def main():
             f"{finding['message']}"
         )
     print_summary(all_findings)
+    write_json_report(
+        all_findings,
+        identity["Account"],
+        session.region_name,
+    )
 
     has_failures = any(
         finding["status"] == "FAIL"

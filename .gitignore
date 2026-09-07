@@ -25,3 +25,6 @@ venv/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# misc
+security_report.json
