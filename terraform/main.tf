@@ -422,6 +422,43 @@ resource "aws_instance" "app" {
     encrypted = true
   }
 
+  user_data_replace_on_change = true
+  user_data                   = <<-EOF
+    #!/bin/bash
+
+    mkdir -p /opt/secure-cloud-app
+
+    cat > /opt/secure-cloud-app/index.html <<'HTML'
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Secure Cloud Infrastructure</title>
+    </head>
+    <body>
+      <h1>Secure Cloud Infrastructure Lab</h1>
+      <p>Private EC2 application reached through the Application Load Balancer.</p>
+    </body>
+    </html>
+    HTML
+
+    cat > /etc/systemd/system/secure-cloud-app.service <<'SERVICE'
+    [Unit]
+    Description=Secure Cloud Lab HTTP Service
+    After=network.target
+
+    [Service]
+    WorkingDirectory=/opt/secure-cloud-app
+    ExecStart=/usr/bin/python3 -m http.server 8080
+    Restart=always
+
+    [Install]
+    WantedBy=multi-user.target
+    SERVICE
+
+    systemctl daemon-reload
+    systemctl enable --now secure-cloud-app
+  EOF
+
   tags = {
     Name        = "secure-cloud-app-instance"
     Project     = "secure-cloud-infrastructure"
@@ -543,10 +580,15 @@ resource "aws_vpc_security_group_egress_rule" "app_https_to_vpc_endpoints" {
 resource "aws_vpc_endpoint" "ssm" {
   count = var.enable_runtime_resources ? 1 : 0
 
-  vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.us-east-1.ssm"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = [aws_subnet.app.id]
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.us-east-1.ssm"
+  vpc_endpoint_type = "Interface"
+
+  subnet_ids = [
+    aws_subnet.app.id,
+    aws_subnet.app_b.id,
+  ]
+
   security_group_ids  = [aws_security_group.vpc_endpoints.id]
   private_dns_enabled = true
 
@@ -558,10 +600,15 @@ resource "aws_vpc_endpoint" "ssm" {
 resource "aws_vpc_endpoint" "ssmmessages" {
   count = var.enable_runtime_resources ? 1 : 0
 
-  vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.us-east-1.ssmmessages"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = [aws_subnet.app.id]
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.us-east-1.ssmmessages"
+  vpc_endpoint_type = "Interface"
+
+  subnet_ids = [
+    aws_subnet.app.id,
+    aws_subnet.app_b.id,
+  ]
+
   security_group_ids  = [aws_security_group.vpc_endpoints.id]
   private_dns_enabled = true
 
@@ -573,10 +620,15 @@ resource "aws_vpc_endpoint" "ssmmessages" {
 resource "aws_vpc_endpoint" "secretsmanager" {
   count = var.enable_runtime_resources ? 1 : 0
 
-  vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.us-east-1.secretsmanager"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = [aws_subnet.app.id]
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.us-east-1.secretsmanager"
+  vpc_endpoint_type = "Interface"
+
+  subnet_ids = [
+    aws_subnet.app.id,
+    aws_subnet.app_b.id,
+  ]
+
   security_group_ids  = [aws_security_group.vpc_endpoints.id]
   private_dns_enabled = true
 
@@ -701,5 +753,121 @@ resource "aws_flow_log" "main" {
   tags = {
     Name    = "secure-cloud-vpc-flow-log"
     Purpose = "VPC network telemetry"
+  }
+}
+
+resource "aws_subnet" "public_b" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.11.0/24"
+  availability_zone       = "us-east-1b"
+  map_public_ip_on_launch = false
+
+  tags = {
+    Name = "secure-cloud-public-b"
+  }
+}
+
+resource "aws_subnet" "app_b" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.12.0/24"
+  availability_zone       = "us-east-1b"
+  map_public_ip_on_launch = false
+
+  tags = {
+    Name = "secure-cloud-app-b"
+  }
+}
+
+resource "aws_subnet" "data_b" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.13.0/24"
+  availability_zone       = "us-east-1b"
+  map_public_ip_on_launch = false
+
+  tags = {
+    Name = "secure-cloud-data-b"
+  }
+}
+
+resource "aws_route_table_association" "public_b" {
+  subnet_id      = aws_subnet.public_b.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "app_b" {
+  subnet_id      = aws_subnet.app_b.id
+  route_table_id = aws_route_table.app.id
+}
+
+resource "aws_route_table_association" "data_b" {
+  subnet_id      = aws_subnet.data_b.id
+  route_table_id = aws_route_table.data.id
+}
+
+resource "aws_lb" "app" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  name               = "secure-cloud-alb"
+  internal           = false
+  load_balancer_type = "application"
+
+  security_groups = [
+    aws_security_group.public.id
+  ]
+
+  subnets = [
+    aws_subnet.public.id,
+    aws_subnet.public_b.id,
+  ]
+
+  enable_deletion_protection = false
+
+  tags = {
+    Name = "secure-cloud-alb"
+  }
+}
+
+resource "aws_lb_target_group" "app" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  name     = "secure-cloud-app-tg"
+  port     = 8080
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.main.id
+
+  target_type = "instance"
+
+  health_check {
+    enabled  = true
+    protocol = "HTTP"
+    port     = "traffic-port"
+    path     = "/"
+  }
+
+  tags = {
+    Name = "secure-cloud-app-target-group"
+  }
+}
+
+resource "aws_lb_target_group_attachment" "app" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  target_group_arn = aws_lb_target_group.app[0].arn
+  target_id        = aws_instance.app[0].id
+  port             = 8080
+}
+
+resource "aws_lb_listener" "https" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  load_balancer_arn = aws_lb.app[0].arn
+  port              = 443
+  protocol          = "HTTPS"
+
+  certificate_arn = "arn:aws:acm:us-east-1:134604471209:certificate/469fd7ba-23d7-4c46-af47-3d68e71d891f"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app[0].arn
   }
 }
