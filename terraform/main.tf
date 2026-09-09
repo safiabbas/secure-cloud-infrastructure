@@ -36,9 +36,10 @@ data "aws_iam_policy_document" "s3_require_tls" {
   }
 }
 
-data "aws_iam_policy_document" "app_permissions" {
+data "aws_iam_policy_document" "app_rds_secret_access" {
+  count = var.enable_runtime_resources ? 1 : 0
+
   statement {
-    sid    = "ReadApplicationSecret"
     effect = "Allow"
 
     actions = [
@@ -46,10 +47,12 @@ data "aws_iam_policy_document" "app_permissions" {
     ]
 
     resources = [
-      aws_secretsmanager_secret.app.arn
+      aws_db_instance.postgres[0].master_user_secret[0].secret_arn
     ]
   }
+}
 
+data "aws_iam_policy_document" "app_permissions" {
   statement {
     sid    = "ReadApplicationObjects"
     effect = "Allow"
@@ -425,6 +428,7 @@ resource "aws_instance" "app" {
   user_data_replace_on_change = true
   user_data                   = <<-EOF
     #!/bin/bash
+    set -e
 
     mkdir -p /opt/secure-cloud-app
 
@@ -432,21 +436,22 @@ resource "aws_instance" "app" {
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Secure Cloud Infrastructure</title>
+        <title>Secure Cloud Infrastructure Lab</title>
     </head>
     <body>
-      <h1>Secure Cloud Infrastructure Lab</h1>
-      <p>Private EC2 application reached through the Application Load Balancer.</p>
+        <h1>Secure Cloud Infrastructure Lab</h1>
+        <p>Private EC2 application behind an HTTPS Application Load Balancer.</p>
     </body>
     </html>
     HTML
 
     cat > /etc/systemd/system/secure-cloud-app.service <<'SERVICE'
     [Unit]
-    Description=Secure Cloud Lab HTTP Service
+    Description=Secure Cloud Application
     After=network.target
 
     [Service]
+    Type=simple
     WorkingDirectory=/opt/secure-cloud-app
     ExecStart=/usr/bin/python3 -m http.server 8080
     Restart=always
@@ -456,7 +461,8 @@ resource "aws_instance" "app" {
     SERVICE
 
     systemctl daemon-reload
-    systemctl enable --now secure-cloud-app
+    systemctl enable secure-cloud-app
+    systemctl start secure-cloud-app
   EOF
 
   tags = {
@@ -870,4 +876,61 @@ resource "aws_lb_listener" "https" {
     type             = "forward"
     target_group_arn = aws_lb_target_group.app[0].arn
   }
+}
+
+resource "aws_db_subnet_group" "main" {
+  name = "secure-cloud-db-subnet-group"
+
+  subnet_ids = [
+    aws_subnet.data.id,
+    aws_subnet.data_b.id,
+  ]
+
+  tags = {
+    Name = "secure-cloud-db-subnet-group"
+  }
+}
+
+resource "aws_db_instance" "postgres" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  identifier = "secure-cloud-postgres"
+
+  engine         = "postgres"
+  instance_class = "db.t3.micro"
+
+  allocated_storage = 20
+  storage_type      = "gp3"
+  storage_encrypted = true
+
+  db_name  = "appdb"
+  username = "dbadmin"
+
+  manage_master_user_password = true
+
+  db_subnet_group_name = aws_db_subnet_group.main.name
+
+  vpc_security_group_ids = [
+    aws_security_group.data.id
+  ]
+
+  publicly_accessible = false
+
+  multi_az = false
+
+  backup_retention_period = 7
+
+  skip_final_snapshot = true
+
+  tags = {
+    Name = "secure-cloud-postgres"
+  }
+}
+
+resource "aws_iam_role_policy" "app_rds_secret_access" {
+  count = var.enable_runtime_resources ? 1 : 0
+
+  name   = "secure-cloud-app-rds-secret-access"
+  role   = aws_iam_role.ec2_ssm.id
+  policy = data.aws_iam_policy_document.app_rds_secret_access[0].json
 }

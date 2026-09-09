@@ -52,3 +52,11 @@ output "app_secret_arn" {
   description = "ARN of the application database secret"
   value       = aws_secretsmanager_secret.app.arn
 }
+
+output "rds_endpoint" {
+  value = var.enable_runtime_resources ? aws_db_instance.postgres[0].endpoint : null
+}
+
+output "rds_master_secret_arn" {
+  value = var.enable_runtime_resources ? aws_db_instance.postgres[0].master_user_secret[0].secret_arn : null
+}
