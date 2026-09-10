@@ -3,29 +3,28 @@ output "vpc_id" {
   value       = aws_vpc.main.id
 }
 
-output "vpc_cidr" {
-  description = "CIDR block of the project VPC"
-  value       = aws_vpc.main.cidr_block
+output "public_subnet_ids" {
+  description = "IDs of the public subnets across both Availability Zones"
+  value = [
+    aws_subnet.public_a.id,
+    aws_subnet.public_b.id
+  ]
 }
 
-output "public_subnet_id" {
-  description = "ID of the public subnet"
-  value       = aws_subnet.public.id
+output "app_subnet_ids" {
+  description = "IDs of the private application subnets across both Availability Zones"
+  value = [
+    aws_subnet.app_a.id,
+    aws_subnet.app_b.id
+  ]
 }
 
-output "app_subnet_id" {
-  description = "ID of the private application subnet"
-  value       = aws_subnet.app.id
-}
-
-output "data_subnet_id" {
-  description = "ID of the private data subnet"
-  value       = aws_subnet.data.id
-}
-
-output "internet_gateway_id" {
-  description = "ID of the VPC Internet Gateway"
-  value       = aws_internet_gateway.main.id
+output "data_subnet_ids" {
+  description = "IDs of the private data subnets across both Availability Zones"
+  value = [
+    aws_subnet.data_a.id,
+    aws_subnet.data_b.id
+  ]
 }
 
 output "app_instance_id" {
@@ -43,20 +42,32 @@ output "app_bucket_name" {
   value       = aws_s3_bucket.app.bucket
 }
 
-output "app_secret_name" {
-  description = "Name of the application database secret"
-  value       = aws_secretsmanager_secret.app.name
-}
-
-output "app_secret_arn" {
-  description = "ARN of the application database secret"
-  value       = aws_secretsmanager_secret.app.arn
+output "alb_dns_name" {
+  description = "DNS name of the internet-facing Application Load Balancer"
+  value       = var.enable_runtime_resources ? aws_lb.app[0].dns_name : null
 }
 
 output "rds_endpoint" {
-  value = var.enable_runtime_resources ? aws_db_instance.postgres[0].endpoint : null
+  description = "Endpoint of the private PostgreSQL RDS instance"
+  value       = var.enable_runtime_resources ? aws_db_instance.postgres[0].endpoint : null
 }
 
 output "rds_master_secret_arn" {
-  value = var.enable_runtime_resources ? aws_db_instance.postgres[0].master_user_secret[0].secret_arn : null
+  description = "ARN of the RDS-managed master user secret"
+  value       = var.enable_runtime_resources ? aws_db_instance.postgres[0].master_user_secret[0].secret_arn : null
+}
+
+output "vpc_flow_logs_log_group" {
+  description = "CloudWatch Logs group containing VPC Flow Logs"
+  value       = aws_cloudwatch_log_group.vpc_flow_logs.name
+}
+
+output "cloudtrail_bucket_name" {
+  description = "S3 bucket storing CloudTrail audit logs"
+  value       = aws_s3_bucket.cloudtrail.bucket
+}
+
+output "cloudtrail_name" {
+  description = "Name of the project CloudTrail trail"
+  value       = aws_cloudtrail.main.name
 }
