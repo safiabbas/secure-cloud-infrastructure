@@ -82,6 +82,8 @@ data "aws_iam_policy_document" "github_actions_security_scan" {
     ]
 
     resources = ["*"]
+
+    #checkov:skip=CKV_AWS_356:Account-wide read-only security scanner requires wildcard resource scope for AWS list and describe APIs; role contains no create, modify, or delete permissions.
   }
 
   statement {

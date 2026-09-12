@@ -11,11 +11,12 @@ if profile_name:
 else:
     session = boto3.Session()
 
-sts = session.client("sts")
-s3 = session.client("s3")
-ec2 = session.client("ec2")
-cloudtrail = session.client("cloudtrail")
-secretsmanager = session.client("secretsmanager")
+session = None
+sts = None
+s3 = None
+ec2 = None
+cloudtrail = None
+secretsmanager = None
 
 SENSITIVE_PORTS = {
     22: "SSH",
@@ -37,6 +38,22 @@ SEVERITY_WEIGHTS = {
     "MEDIUM": 5,
     "LOW": 2,
 }
+
+def initialize_aws_clients():
+    global session, sts, s3, ec2, cloudtrail, secretsmanager
+
+    profile_name = os.getenv("AWS_PROFILE")
+
+    if profile_name:
+        session = boto3.Session(profile_name=profile_name)
+    else:
+        session = boto3.Session()
+
+    sts = session.client("sts")
+    s3 = session.client("s3")
+    ec2 = session.client("ec2")
+    cloudtrail = session.client("cloudtrail")
+    secretsmanager = session.client("secretsmanager")
 
 def create_finding(check_id, status, severity, resource, message):
     return {
@@ -748,6 +765,7 @@ def write_json_report(findings, account_id, region):
     print("JSON report written to security_report.json")
 
 def main():
+    initialize_aws_clients()
     identity = sts.get_caller_identity()
 
     print("Connected to AWS successfully")
