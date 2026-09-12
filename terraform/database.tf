@@ -34,15 +34,50 @@ resource "aws_db_instance" "postgres" {
     aws_security_group.data.id
   ]
 
+  parameter_group_name            = aws_db_parameter_group.postgres.name
+  enabled_cloudwatch_logs_exports = ["postgresql"]
+
   publicly_accessible = false
 
   multi_az = false
 
   backup_retention_period = 7
 
+  copy_tags_to_snapshot = true
+
   skip_final_snapshot = true
 
   tags = {
     Name = "secure-cloud-postgres"
+  }
+}
+
+resource "aws_db_parameter_group" "postgres" {
+  name   = "secure-cloud-postgres-params"
+  family = "postgres18"
+
+  parameter {
+    name  = "log_connections"
+    value = "authentication,authorization"
+  }
+
+  parameter {
+    name  = "log_disconnections"
+    value = "1"
+  }
+
+  parameter {
+    name  = "log_min_duration_statement"
+    value = "1000"
+  }
+
+  parameter {
+    name         = "rds.force_ssl"
+    value        = "1"
+    apply_method = "pending-reboot"
+  }
+
+  tags = {
+    Name = "secure-cloud-postgres-params"
   }
 }

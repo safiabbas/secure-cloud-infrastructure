@@ -1,3 +1,11 @@
+resource "aws_default_security_group" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "secure-cloud-default-sg"
+  }
+}
+
 resource "aws_security_group" "alb" {
   name        = "secure-cloud-public-sg"
   description = "Security group for public-facing resources"
@@ -104,6 +112,8 @@ resource "aws_vpc_security_group_ingress_rule" "vpc_endpoints_https_from_app" {
   ip_protocol = "tcp"
   from_port   = 443
   to_port     = 443
+
+  description = "Allow HTTPS from app tier to interface VPC endpoints"
 }
 
 resource "aws_vpc_security_group_egress_rule" "app_https_to_vpc_endpoints" {
@@ -113,6 +123,8 @@ resource "aws_vpc_security_group_egress_rule" "app_https_to_vpc_endpoints" {
   ip_protocol = "tcp"
   from_port   = 443
   to_port     = 443
+
+  description = "Allow HTTPS from app tier to interface VPC endpoints"
 }
 
 resource "aws_vpc_security_group_egress_rule" "app_https_to_s3" {

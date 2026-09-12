@@ -100,14 +100,52 @@ data "aws_iam_policy_document" "vpc_flow_logs_permissions" {
     effect = "Allow"
 
     actions = [
-      "logs:CreateLogGroup",
       "logs:CreateLogStream",
       "logs:PutLogEvents",
-      "logs:DescribeLogGroups",
       "logs:DescribeLogStreams"
     ]
 
+    resources = [
+      "${aws_cloudwatch_log_group.vpc_flow_logs.arn}:*"
+    ]
+  }
+
+  statement {
+    effect = "Allow"
+
+    actions = [
+      "logs:DescribeLogGroups"
+    ]
+
     resources = ["*"]
+  }
+}
+
+data "aws_iam_policy_document" "cloudtrail_assume_role" {
+  statement {
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudtrail.amazonaws.com"]
+    }
+
+    actions = ["sts:AssumeRole"]
+  }
+}
+
+data "aws_iam_policy_document" "cloudtrail_cloudwatch_permissions" {
+  statement {
+    effect = "Allow"
+
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+
+    resources = [
+      "${aws_cloudwatch_log_group.cloudtrail.arn}:log-stream:*"
+    ]
   }
 }
 
@@ -118,6 +156,11 @@ resource "aws_s3_bucket" "cloudtrail" {
     Name    = "secure-cloud-audit"
     Purpose = "CloudTrail audit logging"
   }
+
+  #checkov:skip=CKV2_AWS_62:No event-driven workflow consumes bucket notifications in this lab
+  #checkov:skip=CKV_AWS_18:Dedicated S3 server access logging is outside lab scope; CloudTrail provides AWS API audit visibility
+  #checkov:skip=CKV_AWS_144:Cross-region replication omitted for lab cost and scope; production DR would evaluate replication requirements
+  #checkov:skip=CKV_AWS_145:SSE-S3 encryption is enabled; customer-managed KMS is intentionally outside lab scope
 }
 
 resource "aws_s3_bucket_public_access_block" "cloudtrail" {
@@ -158,6 +201,12 @@ resource "aws_cloudtrail" "main" {
   include_global_service_events = true
   is_multi_region_trail         = true
   enable_log_file_validation    = true
+
+  cloud_watch_logs_group_arn = "${aws_cloudwatch_log_group.cloudtrail.arn}:*"
+  cloud_watch_logs_role_arn  = aws_iam_role.cloudtrail_cloudwatch.arn
+
+  #checkov:skip=CKV_AWS_252:SNS delivery notifications are outside current lab alerting scope
+  #checkov:skip=CKV_AWS_35:CloudTrail logs are encrypted at rest with S3 server-side encryption; customer-managed KMS is outside lab scope
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
@@ -176,6 +225,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
     noncurrent_version_expiration {
       noncurrent_days = 30
     }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
   }
 }
 
@@ -187,6 +240,9 @@ resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
     Name    = "secure-cloud-vpc-flow-logs"
     Purpose = "VPC network telemetry"
   }
+
+  #checkov:skip=CKV_AWS_158:Default CloudWatch encryption accepted for lab; customer-managed KMS adds cost and key-management complexity
+  #checkov:skip=CKV_AWS_338:Seven-day retention is intentional for lab cost control; production retention would follow compliance requirements
 }
 
 resource "aws_iam_role" "vpc_flow_logs" {
@@ -217,4 +273,28 @@ resource "aws_flow_log" "main" {
     Name    = "secure-cloud-vpc-flow-log"
     Purpose = "VPC network telemetry"
   }
+}
+
+resource "aws_cloudwatch_log_group" "cloudtrail" {
+  name              = "/secure-cloud/cloudtrail"
+  retention_in_days = 30
+
+  tags = {
+    Name    = "secure-cloud-cloudtrail"
+    Purpose = "CloudTrail security monitoring"
+  }
+
+  #checkov:skip=CKV_AWS_158:Default CloudWatch encryption accepted for lab; customer-managed KMS adds cost and key-management complexity
+  #checkov:skip=CKV_AWS_338:Thirty-day searchable retention is intentional; durable CloudTrail records are retained separately in S3
+}
+
+resource "aws_iam_role" "cloudtrail_cloudwatch" {
+  name               = "secure-cloud-cloudtrail-cloudwatch-role"
+  assume_role_policy = data.aws_iam_policy_document.cloudtrail_assume_role.json
+}
+
+resource "aws_iam_role_policy" "cloudtrail_cloudwatch" {
+  name   = "secure-cloud-cloudtrail-cloudwatch-policy"
+  role   = aws_iam_role.cloudtrail_cloudwatch.id
+  policy = data.aws_iam_policy_document.cloudtrail_cloudwatch_permissions.json
 }

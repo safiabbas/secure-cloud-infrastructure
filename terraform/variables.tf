@@ -7,5 +7,5 @@ variable "vpc_cidr" {
 variable "enable_runtime_resources" {
   description = "Whether to deploy premium runtime resources such as EC2 and VPC Interface Endpoints"
   type        = bool
-  default     = true
+  default     = false
 }

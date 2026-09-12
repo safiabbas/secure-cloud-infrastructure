@@ -33,6 +33,11 @@ resource "aws_s3_bucket" "app" {
     Project     = "secure-cloud-infrastructure"
     Environment = "lab"
   }
+
+  #checkov:skip=CKV2_AWS_62:No event-driven workflow consumes bucket notifications in this lab
+  #checkov:skip=CKV_AWS_18:Dedicated S3 server access logging is outside current lab scope
+  #checkov:skip=CKV_AWS_144:Cross-region replication omitted for lab cost and scope
+  #checkov:skip=CKV_AWS_145:SSE-S3 encryption is enabled; customer-managed KMS is intentionally outside lab scope
 }
 
 resource "aws_s3_bucket_public_access_block" "app" {
@@ -65,4 +70,19 @@ resource "aws_s3_bucket_versioning" "app" {
 resource "aws_s3_bucket_policy" "app" {
   bucket = aws_s3_bucket.app.id
   policy = data.aws_iam_policy_document.s3_require_tls.json
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "app" {
+  bucket = aws_s3_bucket.app.id
+
+  rule {
+    id     = "abort-incomplete-multipart-uploads"
+    status = "Enabled"
+
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
 }

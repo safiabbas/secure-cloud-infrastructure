@@ -2,8 +2,14 @@ import boto3
 import sys
 import json
 from datetime import datetime, timezone
+import os
 
-session = boto3.Session(profile_name="secure-cloud")
+profile_name = os.getenv("AWS_PROFILE")
+
+if profile_name:
+    session = boto3.Session(profile_name=profile_name)
+else:
+    session = boto3.Session()
 
 sts = session.client("sts")
 s3 = session.client("s3")

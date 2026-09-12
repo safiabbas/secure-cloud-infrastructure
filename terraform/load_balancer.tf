@@ -19,6 +19,8 @@ resource "aws_lb" "app" {
   tags = {
     Name = "secure-cloud-alb"
   }
+
+  #checkov:skip=CKV2_AWS_28:WAF omitted for cost and scope in this security lab; production deployment would use AWS WAF
 }
 
 resource "aws_lb_target_group" "app" {
@@ -57,6 +59,7 @@ resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.app[0].arn
   port              = 443
   protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-Res-2021-06"
 
   certificate_arn = "arn:aws:acm:us-east-1:134604471209:certificate/469fd7ba-23d7-4c46-af47-3d68e71d891f"
 
