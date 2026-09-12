@@ -4,13 +4,6 @@ import json
 from datetime import datetime, timezone
 import os
 
-profile_name = os.getenv("AWS_PROFILE")
-
-if profile_name:
-    session = boto3.Session(profile_name=profile_name)
-else:
-    session = boto3.Session()
-
 session = None
 sts = None
 s3 = None
@@ -428,50 +421,105 @@ def check_cloudtrail_enabled():
 def check_vpc_flow_logs():
     findings = []
 
-    vpcs = ec2.describe_vpcs()["Vpcs"]
-
-    flow_logs = ec2.describe_flow_logs()["FlowLogs"]
-
-    for vpc in vpcs:
-        vpc_id = vpc["VpcId"]
-
-        matching_logs = [
-            flow_log
-            for flow_log in flow_logs
-            if flow_log["ResourceId"] == vpc_id
+    vpcs = ec2.describe_vpcs(
+        Filters=[
+            {
+                "Name": "tag:Name",
+                "Values": ["secure-cloud-vpc"],
+            }
         ]
+    )["Vpcs"]
 
-        active_logs = [
-            flow_log
-            for flow_log in matching_logs
-            if flow_log["FlowLogStatus"] == "ACTIVE"
+    if not vpcs:
+        findings.append(
+            create_finding(
+                "VPC_FLOW_LOGS",
+                "FAIL",
+                "MEDIUM",
+                "secure-cloud-vpc",
+                "Project VPC secure-cloud-vpc was not found",
+            )
+        )
+        return findings
+
+    vpc_id = vpcs[0]["VpcId"]
+
+    flow_logs = ec2.describe_flow_logs(
+        Filters=[
+            {
+                "Name": "resource-id",
+                "Values": [vpc_id],
+            }
         ]
+    )["FlowLogs"]
 
-        if active_logs:
-            finding = create_finding(
+    active_flow_logs = [
+        flow_log
+        for flow_log in flow_logs
+        if flow_log.get("FlowLogStatus") == "ACTIVE"
+    ]
+
+    if active_flow_logs:
+        findings.append(
+            create_finding(
                 "VPC_FLOW_LOGS",
                 "PASS",
                 "MEDIUM",
                 vpc_id,
-                "VPC has an active Flow Log",
+                f"VPC Flow Logs are enabled and active for {vpc_id}",
             )
-        else:
-            finding = create_finding(
+        )
+    else:
+        findings.append(
+            create_finding(
                 "VPC_FLOW_LOGS",
                 "FAIL",
                 "MEDIUM",
                 vpc_id,
-                "VPC does not have an active Flow Log",
+                f"VPC Flow Logs are not enabled for {vpc_id}",
             )
-
-        findings.append(finding)
+        )
 
     return findings
 
 def check_required_vpc_endpoints():
     findings = []
 
-    response = ec2.describe_vpc_endpoints()
+    vpcs = ec2.describe_vpcs(
+        Filters=[
+            {
+                "Name": "tag:Name",
+                "Values": ["secure-cloud-vpc"],
+            }
+        ]
+    )["Vpcs"]
+
+    if not vpcs:
+        for service in REQUIRED_VPC_ENDPOINT_SERVICES:
+            short_name = service.split(".")[-1]
+
+            findings.append(
+                create_finding(
+                    "VPC_ENDPOINT_REQUIRED",
+                    "FAIL",
+                    "MEDIUM",
+                    short_name,
+                    "Project VPC secure-cloud-vpc was not found",
+                )
+            )
+
+        return findings
+
+    vpc_id = vpcs[0]["VpcId"]
+
+    response = ec2.describe_vpc_endpoints(
+        Filters=[
+            {
+                "Name": "vpc-id",
+                "Values": [vpc_id],
+            }
+        ]
+    )
 
     available_services = {
         endpoint["ServiceName"]
@@ -488,7 +536,7 @@ def check_required_vpc_endpoints():
                 "PASS",
                 "MEDIUM",
                 short_name,
-                f"Required VPC endpoint for {short_name} is available",
+                f"Required VPC endpoint for {short_name} is available in {vpc_id}",
             )
         else:
             finding = create_finding(
@@ -496,7 +544,7 @@ def check_required_vpc_endpoints():
                 "FAIL",
                 "MEDIUM",
                 short_name,
-                f"Required VPC endpoint for {short_name} is missing",
+                f"Required VPC endpoint for {short_name} is missing from {vpc_id}",
             )
 
         findings.append(finding)
