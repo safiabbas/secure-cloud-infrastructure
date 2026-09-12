@@ -59,7 +59,7 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
       variable = "token.actions.githubusercontent.com:sub"
 
       values = [
-        "repo:safiabbas/secure-cloud-infrastructure:ref:refs/heads/main"
+        "repo:safiabbas@324165917/secure-cloud-infrastructure@1355472048:ref:refs/heads/main"
       ]
     }
   }
